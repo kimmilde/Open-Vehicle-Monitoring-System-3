@@ -832,7 +832,7 @@ void OvmsVehicleKiaSoulEv::HandleCharging()
 /**
  * Update metrics when charging stops
  */
-// Need to change something here.. 
+// 
 void OvmsVehicleKiaSoulEv::HandleChargeStop()
 	{
   ESP_LOGI(TAG, "Charging done...");
