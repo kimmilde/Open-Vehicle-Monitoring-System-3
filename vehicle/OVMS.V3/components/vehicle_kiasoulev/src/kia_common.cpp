@@ -28,51 +28,39 @@ int KiaVehicle::CalcRemainingChargeMinutes(float chargespeed, int fromSoc, int t
 /*
  * A crude voltage to SOC calculator for AUX-battery
  */
-int KiaVehicle::CalcAUXSoc(float volt)
-	{
+int KiaVehicle::CalcAUXSoc(float volt) {
 	int soc=0;
-	if( volt>=12.73)
-		{
+	if(volt>=12.73) {
 		soc=100;
 		}
-	else if(volt>=12.62)
-		{
+	else if(volt>=12.62){
 		soc=((volt-12.62)*90.0)+90;
 		}
-	else if(volt>=12.50)
-		{
+	else if(volt>=12.50){
 		soc=((volt-12.50)*83.33)+80;
 		}
-	else if(volt>=12.37)
-		{
+	else if(volt>=12.37){
 		soc=((volt-12.37)*76.92)+70;
 		}
-	else if(volt>=12.24)
-		{
+	else if(volt>=12.24){
 		soc=((volt-12.24)*76.92)+60;
 		}
-	else if(volt>=12.10)
-		{
+	else if(volt>=12.10){
 		soc=((volt-12.10)*71.42)+50;
 		}
-	else if(volt>=11.96)
-		{
+	else if(volt>=11.96){
 		soc=((volt-11.96)*71.42)+40;
 		}
-	else if(volt>=11.81)
-		{
+	else if(volt>=11.81){
 		soc=((volt-11.81)*66.67)+30;
 		}
-	else if(volt>=11.66)
-		{
+	else if(volt>=11.66){
 		soc=((volt-11.66)*66.67)+20;
 		}
-	else if(volt>=11.51)
-		{
+	else if(volt>=11.51){
 		soc=((volt-11.51)*66.67)+10;
 		}
-	else if (volt>=11.36)
-		{
+	else if (volt>=11.36){
 		soc=((volt-11.36)*66.67);
 		}
 	return soc;
@@ -82,10 +70,7 @@ void KiaVehicle::SaveStatus()
 	{
 	FILE *sf = NULL;
 	sf = fopen(SAVE_STATUS_DATA_PATH, "w");
-	if (sf == NULL)
-		{
-		return;
-		}
+	if (sf == NULL) { return; }
 
 	// Set standard metrics automatically
 	kia_save_status.soc = StdMetrics.ms_v_bat_soc->AsFloat(0);
