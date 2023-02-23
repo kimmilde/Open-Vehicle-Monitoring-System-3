@@ -153,6 +153,12 @@
 ;		0.4.7 13-apr-2019 - Geir Øyvind Vælidalo
 ;			- Added SaveStatus so that the SOC is as correct as possible even after a (unwanted) reboot while car is off.
 ;
+;		0.4.8 22.02.2023 - Kimmilde
+;			- 
+;			- 
+; 			- Fixing charging issues. 
+;
+;
 ;    (C) 2011       Michael Stegen / Stegen Electronics
 ;    (C) 2011-2017  Mark Webb-Johnson
 ;    (C) 2011       Sonny Chen @ EPRO/DX
@@ -196,7 +202,7 @@
 #include "ovms_notify.h"
 #include <sys/param.h>
 
-#define VERSION "0.4.7"
+#define VERSION "0.4.8"
 
 static const char *TAG = "v-kiasoulev";
 
@@ -222,27 +228,27 @@ static const OvmsVehicle::poll_pid_t vehicle_kiasoulev_polls[] =
 // Charging profile
 // Based partly on logged charging from 120kW Delta Charger
 charging_profile soul_charge_steps[] = {
-		//from%, to%, Chargespeed in Wh
-		 { 0,5,20000 },
-		 { 5,10,40000 },
-     { 10,20,45000 },
-     { 20,30,47000 },
-     { 30,50,49000 },
-     { 50,70,68000 },
-     { 70,72,55000 },
-     { 72,74,46800 },
-		 { 74,76,44140 },
-		 { 76,79,37500 },
-     { 79,81,30500 },
-     { 81,83,27500 },
-     { 83,89,21500 },
-     { 89,90,20500 },
-     { 90,91,18000 },
-     { 91,92,15500 },
-     { 92,93,13200 },
-     { 93,95,9000 },
-     { 95,100,8000 },
-     { 0,0,0 },
+	//from%, to%, Chargespeed in Wh
+	{ 0,5,20000 },
+	{ 5,10,40000 },
+	{ 10,20,45000 },
+	{ 20,30,47000 },
+	{ 30,50,49000 },
+	{ 50,70,68000 },
+	{ 70,72,55000 },
+	{ 72,74,46800 },
+	{ 74,76,44140 },
+	{ 76,79,37500 },
+	{ 79,81,30500 },
+	{ 81,83,27500 },
+	{ 83,89,21500 },
+	{ 89,90,20500 },
+	{ 90,91,18000 },
+	{ 91,92,15500 },
+	{ 92,93,13200 },
+	{ 93,95,9000 },
+	{ 95,100,8000 },
+	{ 0,0,0 },
 };
 
 /**
@@ -301,7 +307,7 @@ OvmsVehicleKiaSoulEv::OvmsVehicleKiaSoulEv()
   BmsSetCellArrangementTemperature(8, 1);
   BmsSetCellLimitsVoltage(2.0,5.0);
   BmsSetCellLimitsTemperature(-35,90);
-  BmsSetCellDefaultThresholdsVoltage(0.1, 0.2); //TODO What values do we want here?
+  BmsSetCellDefaultThresholdsVoltage(0.1, 0.2); //TODO What values do we want here? max deviation should be 0.04V
   BmsSetCellDefaultThresholdsTemperature(4.0, 8.0); // and here?
 
   //Disable BMS alerts by default
@@ -404,7 +410,7 @@ OvmsVehicleKiaSoulEv::OvmsVehicleKiaSoulEv()
 
   cmd_xks->RegisterCommand("trunk","Open trunk", CommandOpenTrunk, "<pin>",1,1);
   cmd_xks->RegisterCommand("chargeport","Open chargeport", CommandOpenChargePort, "<pin>",1,1);
-  cmd_xks->RegisterCommand("ParkBreakService","Enable break pad service", CommandParkBreakService, "<on/off/off2>",1,1);
+  cmd_xks->RegisterCommand("ParkBreakService","Enable brake pad service", CommandParkBreakService, "<on/off/off2>",1,1);
 
   // For test purposes
   cmd_xks->RegisterCommand("sjb","Send command to SJB ECU", xks_sjb, "<b1><b2><b3>", 3,3);
@@ -493,7 +499,6 @@ void OvmsVehicleKiaSoulEv::vehicle_kiasoulev_car_on(bool isOn)
   		ESP_LOGI(TAG,"CAR IS ON");
 		StdMetrics.ms_v_env_on->SetValue(isOn);
 		StdMetrics.ms_v_env_awake->SetValue(isOn);
-
 		StdMetrics.ms_v_env_charging12v->SetValue( false );
     POLLSTATE_RUNNING;
     kia_ready_for_chargepollstate = true;
@@ -601,17 +606,22 @@ void OvmsVehicleKiaSoulEv::Ticker1(uint32_t ticker)
 
 
 	// Check for charging status changes:
-	// 
-	bool isCharging = (ks_charge_bits.ChargingChademo || ks_charge_bits.ChargingJ1772) 	&& (CHARGE_CURRENT > 0);
+	// Here we need to check something other than CHARGE_CURRENT maybe? 
+	// What data is handed over to us when the charging starts again? 
+	// We know that for sure that 12V is over 12.8 when charging the car. 
+	// Will ChargingJ1772 update? It should be handled? 
 
-	if (isCharging)
-		{
+	// If chargeport is open, and 12V battery is at charging state, assume charging. 
+	bool isCharging = (StdMetrics.ms_v_bat_12v_voltage->AsFloat() >= 12.9 && StdMetrics.ms_v_door_chargeport->AsBool());
+
+	// Save these for later use. 
+	//	bool isCharging = (ks_charge_bits.ChargingChademo || ks_charge_bits.ChargingJ1772 && StdMetrics.ms_v_bat_12v_voltage->AsFloat() >= 12.9 && StdMetrics.ms_v_door_chargeport->AsBool());
+	//	bool isCharging = (ks_charge_bits.ChargingChademo || ks_charge_bits.ChargingJ1772) 	&& (CHARGE_CURRENT > 0);
+	if (isCharging) {
 		HandleCharging();
-		}
-	else if (!isCharging && StdMetrics.ms_v_charge_inprogress->AsBool())
-		{
+	} else if (!isCharging && StdMetrics.ms_v_charge_inprogress->AsBool()) {
 		HandleChargeStop();
-		}
+	}
 
 	if(m_poll_state==0 && StdMetrics.ms_v_door_chargeport->AsBool() && kia_ready_for_chargepollstate)	{
   		//Set pollstate charging if car is off and chargeport is open.
@@ -623,32 +633,25 @@ void OvmsVehicleKiaSoulEv::Ticker1(uint32_t ticker)
 
 	//**** AUX Battery drain prevention code ***
 	//If poll state is in CHARGE MODE, charge current is 0 and no clients are connected for 60 seconds, we'll turn off polling.
-	if((StdMetrics.ms_s_v2_peers->AsInt() + StdMetrics.ms_s_v3_peers->AsInt())==0)
-		{
-		if(m_poll_state==2 && (CHARGE_CURRENT == 0))
-			{
+	if((StdMetrics.ms_s_v2_peers->AsInt() + StdMetrics.ms_s_v3_peers->AsInt())==0) {
+		if(m_poll_state==2 && (CHARGE_CURRENT == 0)){
 			kia_secs_with_no_client++;
-			if(kia_secs_with_no_client>60)
-				{
+			if(kia_secs_with_no_client>60)	{
 				ESP_LOGI(TAG,"NO CLIENTS. Turning off polling.");
 				POLLSTATE_OFF;
 				}
 			}
-		}
-	//If client connects, we set the appropriate poll state
-	else if(kia_secs_with_no_client>0 && m_poll_state==0)
-		{
+		} 
+		else if(kia_secs_with_no_client>0 && m_poll_state==0) { //If client connects, we set the appropriate poll state
 		kia_secs_with_no_client=0;
 		ESP_LOGI(TAG,"CLIENT CONNECTED. Turning on polling.");
-		if(StdMetrics.ms_v_env_on->AsBool())
-			{
+		if(StdMetrics.ms_v_env_on->AsBool()){ // ms_v_env_on = Car is on
 			POLLSTATE_RUNNING;
-			}
-		else
-			{
-			POLLSTATE_CHARGING;
-			}
 		}
+		else{
+			POLLSTATE_CHARGING;
+		}
+	}
 	//**** End of AUX Battery drain prevention code ***
 
 	// Check door lock status if clients are connected and we think the status might have changed
@@ -712,26 +715,25 @@ void OvmsVehicleKiaSoulEv::EventListener(std::string event, void* data)
 
 /**
  * Update metrics when charging
- */
+*/
 void OvmsVehicleKiaSoulEv::HandleCharging()
 	{
-	if (!StdMetrics.ms_v_charge_inprogress->AsBool() )
-  		{
-	  ESP_LOGI(TAG, "Charging starting");
-    // ******* Charging started: **********
-    StdMetrics.ms_v_charge_duration_full->SetValue( 1440, Minutes ); // Lets assume 24H to full.
-    if( StdMetrics.ms_v_charge_timermode->AsBool())
-    		{
-    		SET_CHARGE_STATE("charging","scheduledstart");
-    		}
-    	else
-    		{
-    		SET_CHARGE_STATE("charging","onrequest");
-    		}
-    	StdMetrics.ms_v_charge_kwh->SetValue( 0, kWh );  // kWh charged
+	if (!StdMetrics.ms_v_charge_inprogress->AsBool()){
+	  	ESP_LOGI(TAG, "Charging starting");
+
+		// ******* Charging started: **********
+		StdMetrics.ms_v_charge_duration_full->SetValue(1440, Minutes); // Lets assume 24H to full.
+		if(StdMetrics.ms_v_charge_timermode->AsBool())	{
+			SET_CHARGE_STATE("charging","scheduledstart");
+		}
+		else{
+			SET_CHARGE_STATE("charging","onrequest");
+		}
+
+    	StdMetrics.ms_v_charge_kwh->SetValue(0, kWh);  // kWh charged
 		kia_cum_charge_start = CUM_CHARGE; // Battery charge base point
-		StdMetrics.ms_v_charge_inprogress->SetValue( true );
-		StdMetrics.ms_v_env_charging12v->SetValue( true);
+		StdMetrics.ms_v_charge_inprogress->SetValue(true);
+		StdMetrics.ms_v_env_charging12v->SetValue(true); 
 
 		BmsResetCellStats();
 
@@ -832,32 +834,33 @@ void OvmsVehicleKiaSoulEv::HandleCharging()
 /**
  * Update metrics when charging stops
  */
-// 
-void OvmsVehicleKiaSoulEv::HandleChargeStop()
-	{
-  ESP_LOGI(TAG, "Charging done...");
+void OvmsVehicleKiaSoulEv::HandleChargeStop() {
+	ESP_LOGI(TAG, "Charging done...");
 
-  // ** Charge completed or interrupted: **
+	// ** Charge completed or interrupted: **
 	StdMetrics.ms_v_charge_current->SetValue( 0 );
-  StdMetrics.ms_v_charge_climit->SetValue( 0 );
-  if (BAT_SOC == 100 || (BAT_SOC > 82 && ks_charge_bits.ChargingChademo))
-  		{
-  		SET_CHARGE_STATE("done","stopped");
-  		}
-  else if (BAT_SOC == 80 && ks_charge_bits.ChargingJ1772)
-  		{
-  		SET_CHARGE_STATE("stopped","scheduledstop");
-  		}
-  else
-  		{
-		SET_CHARGE_STATE("stopped","interrupted");
-		}
-	StdMetrics.ms_v_charge_substate->SetValue("onrequest");
-  StdMetrics.ms_v_charge_kwh->SetValue( (CUM_CHARGE - kia_cum_charge_start)/10.0, kWh );  // kWh charged
+	StdMetrics.ms_v_charge_climit->SetValue( 0 );
 
-  kia_cum_charge_start = 0;
-  StdMetrics.ms_v_charge_inprogress->SetValue( false );
-	StdMetrics.ms_v_env_charging12v->SetValue( false );
+	if (BAT_SOC == 100 || (BAT_SOC > 82 && ks_charge_bits.ChargingChademo))	{ 
+		SET_CHARGE_STATE("done","stopped"); 
+	}
+	else if (BAT_SOC > 80 && ks_charge_bits.ChargingJ1772) {
+		SET_CHARGE_STATE("stopped","scheduledstop");
+	}
+	//else if (!StdMetrics.ms_v_door_chargeport->AsBool()) {  // If chargeport closes. 
+	//	StdMetrics.ms_v_charge_inprogress->SetValue(false);
+	//	SET_CHARGE_STATE("done","stopped");
+	//}
+	else { 
+		SET_CHARGE_STATE("stopped","interrupted");
+	}
+
+	StdMetrics.ms_v_charge_substate->SetValue("onrequest"); 
+  	StdMetrics.ms_v_charge_kwh->SetValue( (CUM_CHARGE - kia_cum_charge_start)/10.0, kWh );  // kWh charged
+
+  	kia_cum_charge_start = 0; 
+  	StdMetrics.ms_v_charge_inprogress->SetValue(false); 
+	StdMetrics.ms_v_env_charging12v->SetValue(false);
 	ks_charge_bits.ChargingChademo = false;
 	ks_charge_bits.ChargingJ1772 = false;
 	m_c_speed->SetValue(0);
@@ -867,7 +870,7 @@ void OvmsVehicleKiaSoulEv::HandleChargeStop()
 	SaveStatus();
 
 	POLLSTATE_OFF;
-	}
+}
 
 /**
  *  Sets the charge metrics
